@@ -8,3 +8,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO api_keys (name, key_hash)
+VALUES ('evaluation-service-local', encode(digest('tm_local_evaluation_key', 'sha256'), 'hex'))
+ON CONFLICT (key_hash) DO NOTHING;

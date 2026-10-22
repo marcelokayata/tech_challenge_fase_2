@@ -1,4 +1,35 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: togglemaster
+      POSTGRES_USER: local
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localpass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./auth-service/db/init.sql:/docker-entrypoint-initdb.d/01-auth.sql:ro
+      - ./flag-service/db/init.sql:/docker-entrypoint-initdb.d/02-flags.sql:ro
+      - ./targeting-service/db/init.sql:/docker-entrypoint-initdb.d/03-targeting.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U local -d togglemaster"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   localstack:
     image: localstack/localstack:3.8.1
     container_name: localstack
@@ -35,5 +66,85 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Set AWS_SECRET_ACCESS_KEY}
       AWS_ENDPOINT_URL: http://localstack:4566
 
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: "8001"
+      DATABASE_URL: postgres://local:${POSTGRES_PASSWORD:-localpass}@postgres:5432/togglemaster?sslmode=disable
+      MASTER_KEY: ${MASTER_KEY:-admin-secreto-123}
+
+  flag-service:
+    build:
+      context: ./flag-service
+      dockerfile: Dockerfile
+    container_name: flag-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    ports:
+      - "8002:8002"
+    environment:
+      PORT: "8002"
+      DATABASE_URL: postgres://local:${POSTGRES_PASSWORD:-localpass}@postgres:5432/togglemaster?sslmode=disable
+      AUTH_SERVICE_URL: http://auth-service:8001
+
+  targeting-service:
+    build:
+      context: ./targeting-service
+      dockerfile: Dockerfile
+    container_name: targeting-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    ports:
+      - "8003:8003"
+    environment:
+      PORT: "8003"
+      DATABASE_URL: postgres://local:${POSTGRES_PASSWORD:-localpass}@postgres:5432/togglemaster?sslmode=disable
+      AUTH_SERVICE_URL: http://auth-service:8001
+
+  evaluation-service:
+    build:
+      context: ./evaluation-service
+      dockerfile: Dockerfile
+    container_name: evaluation-service
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      flag-service:
+        condition: service_started
+      targeting-service:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    ports:
+      - "8004:8004"
+    environment:
+      PORT: "8004"
+      REDIS_URL: redis://redis:6379
+      FLAG_SERVICE_URL: http://flag-service:8002
+      TARGETING_SERVICE_URL: http://targeting-service:8003
+      SERVICE_API_KEY: ${SERVICE_API_KEY:-tm_local_evaluation_key}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_SQS_URL: http://localstack:4566/000000000000/analytics-events
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+
 volumes:
   localstack-data:
+  postgres-data:
