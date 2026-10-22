@@ -28,7 +28,7 @@ type App struct {
 }
 
 func main() {
-	_ = godotenv.Load() // Carrega .env para dev local
+	_ = godotenv.Load(".env", "../.env") // Carrega configuração local, inclusive ao rodar dentro da pasta do serviço.
 
 	// --- Configuração ---
 	port := os.Getenv("PORT")
@@ -54,6 +54,7 @@ func main() {
 	// SQS é opcional no dev local, mas obrigatório em prod
 	sqsQueueURL := os.Getenv("AWS_SQS_URL")
 	awsRegion := os.Getenv("AWS_REGION")
+	awsEndpointURL := os.Getenv("AWS_ENDPOINT_URL")
 	if sqsQueueURL == "" {
 		log.Println("Atenção: AWS_SQS_URL não definida. Eventos não serão enviados.")
 	}
@@ -62,7 +63,7 @@ func main() {
 	}
 
 	// --- Inicializa Clientes ---
-	
+
 	// Cliente Redis
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
@@ -77,7 +78,11 @@ func main() {
 	// Cliente SQS (AWS SDK)
 	var sqsSvc *sqs.SQS
 	if sqsQueueURL != "" {
-		sess, err := session.NewSession(&aws.Config{Region: aws.String(awsRegion)})
+		awsConfig := &aws.Config{Region: aws.String(awsRegion)}
+		if awsEndpointURL != "" {
+			awsConfig.Endpoint = aws.String(awsEndpointURL)
+		}
+		sess, err := session.NewSession(awsConfig)
 		if err != nil {
 			log.Fatalf("Não foi possível criar sessão AWS: %v", err)
 		}
